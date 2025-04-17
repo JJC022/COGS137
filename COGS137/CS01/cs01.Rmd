@@ -1,0 +1,232 @@
+---
+title: "CS01: Biomarkers of Recent Use"
+author: "Jaden Clarke"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+---
+
+## Introduction
+```{r setup, include=FALSE}
+# control global Rmd chunk settings
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+```
+
+## Questions
+
+
+### Load packages
+
+```{r load-packages, message=FALSE}
+library(tidyverse)
+library(janitor)
+library(e1071)
+```
+
+
+## The Data
+
+
+### Data Import
+
+```{r}
+
+blood <- read_csv(r"{C:\Users\SmotP\Documents\COGS137\CS01\data\Blood.csv}")
+breath <- read_csv(r"{C:\Users\SmotP\Documents\COGS137\CS01\data\Breath.csv}")
+OF <-read_csv(r"{C:\Users\SmotP\Documents\COGS137\CS01\data\OF.csv}")
+```
+
+### Data Wrangling
+First we will merge all three data files using code from the EDA notes. This will ensure that every row has a timepoint associated with it and we do not have any duplicates. It is very important to remember .keep_all must be TRUE, or we will find ourselves with only one column. 
+```{r}
+data <- blood|>
+  clean_names()|> #fix those unsightly column names 
+  select(-cbg, -cbn, -cbd)|>
+  mutate(timepoint = cut(time_from_start, #get our timepoints added
+                         breaks = c(-Inf, 0, 30, 70, 100, 180, 210, 240, 270, 300, Inf), 
+                         labels = c("pre-smoking", "0-30 min", "31-70 min", "71-100 min", "101-180 min", 
+                                    "181-210 min", "211-240 min", "241-270 min", "271-300 min", "301+ min")))|>
+  filter(!is.na(timepoint)) |> #remove anything that did not fall into out chosen timepoints
+  group_by(fluid_type, timepoint) |> #create groups for the different measurement types and timepoints
+  distinct(id, .keep_all=TRUE)|> #only keep unique subjects for each timepoint
+  ungroup()|>
+  pivot_longer(cols = c(thc, x11_oh_thc, thc_cooh, thc_cooh_gluc, thc_v), names_to = "compound", values_to = "concentration")
+
+```
+
+## Analysis
+How can we best identify the ideal threshold for determining whether someone has consumed Marijuana recently? Given that the intent here is to inform policymaking, our priority was to minimize the number of false positives. We are going to assess all of the cannabinoids that were present in the data here. We think it is good to cast a wide net to leverage all of the data collected. We were unsure if we should base our test off of the presence of a single biomarker or a combination of biomarkers. Due to inconsistencies with the combined levels of biomarkers we elected to base our test off of the presence of a single metabolite. A quantile based test is a straightforward and easily intrepretable test for evaluating how sensitive a test should be. These combinations will likely not be captured by a quantile based analysis, and a Support Vector Machine or Bayesian Inference test would be more suited to exploring the relations between dimensions in the data. In order to do that, we are finding the thresholds which would have identified a certain quantile of our subjects, and we are then checking how many false positives that threshold would generate in the placebo group. 
+```{r}
+# First define the quantiles we want to use
+quantiles <- seq(0, 1, by = 0.05)  
+
+# Get unique values
+unique_timepoints <- unique(data$timepoint)
+unique_compounds <- unique(data$compound)  
+
+# Calculate thresholds for each compound
+blood_thresholds <- data |>
+  filter(treatment != "Placebo", fluid_type == "WB") |>
+  group_by(timepoint, compound) |>  
+  summarize(
+    concentration_quantiles = list(quantile(concentration, probs = quantiles, na.rm = TRUE)),
+    .groups = "drop"
+  ) |>
+  unnest_wider(concentration_quantiles, names_sep = "_") |>
+  pivot_longer(
+    cols = starts_with("concentration_quantiles_"),
+    names_to = "quantile_level",
+    values_to = "threshold"
+  )|>
+  na.omit() #remove missing values 
+
+
+```
+Below we have code dedicated to evaluating the effectiveness of a test - 
+
+```{r}
+#You do not have time to make a resuable tool - just make it work 
+
+#Using the unique function we save all of the timepoints and compounds we have examined. The plan is to iterate through these and pass each one to a filter to extract the relevant data for each step of our analysis. 
+
+
+# Improved filter function with correct parameter names
+filter_data <- function(data, tp, cmp, thresh) {
+  data |>
+    filter(
+      timepoint == tp,
+      compound == cmp,
+      concentration >= thresh,
+      concentration != 0
+    )
+}
+
+#  sensitivity/specificity calculation function
+calculate_metrics <- function(data, threshold, quantile_level) {
+  # Create user and control groups
+  users <- data |> filter(treatment %in% c("5.90%", "13.40%"))
+  controls <- data |> filter(treatment == "Placebo")
+  
+  # Calculate metrics
+  true_positives <- sum(users$concentration >= threshold, na.rm = TRUE)
+  false_negatives <- sum(users$concentration < threshold, na.rm = TRUE)
+  true_negatives <- sum(controls$concentration < threshold, na.rm = TRUE)
+  false_positives <- sum(controls$concentration >= threshold, na.rm = TRUE)
+  
+  # Calculate sensitivity and specificity
+  sensitivity <- true_positives / (true_positives + false_negatives)
+  specificity <- true_negatives / (true_negatives + false_positives)
+  
+  #cat("true_positives:", true_positives, "false_positives:", false_positives, "true_negatives:", true_negatives, "false_negatives:", false_negatives, sep = " ")
+  n_users = nrow(users)
+  
+  return(tibble(
+    sensitivity = sensitivity,
+    specificity = specificity,
+    quantile_level = quantile_level, 
+    true_positives = true_positives,
+    false_negatives = false_negatives,
+    true_negatives = true_negatives,
+    false_positives = false_positives,
+    n_users = nrow(users),
+    n_controls = nrow(controls),
+  ))
+}
+
+
+```
+debugging cell
+```{r}
+blood_thresholds |>
+  left_join(data, by = c("timepoint", "compound")) |>
+  group_by(timepoint, compound, quantile_level) |>
+  summarise(n = n(), has_data = any(!is.na(concentration)), .groups = "drop") |>
+  filter(!has_data)
+```
+```{r}
+results <- blood_thresholds |>
+  group_by(timepoint, compound, threshold) |>
+  group_modify(~ {
+    filtered_data <- data |> 
+      na.omit() |>
+      filter(
+        timepoint == cur_group()$timepoint,  # Use cur_group() instead of .y
+        compound == cur_group()$compound,
+        quantile_level == cur_group()$quantile_level
+      )
+    
+    calculate_metrics(filtered_data, threshold = cur_group()$threshold)
+  })
+
+
+```
+```{r}
+results <- blood_thresholds |>
+  group_by(timepoint, compound, quantile_level) |>
+  group_modify(~{
+    # .y contains the grouping variables for current group
+    # .x contains the current group's data
+    current_data <- data |> 
+      filter(
+        timepoint == .y$timepoint[1],
+        compound == .y$compound[1]
+      ) |>
+      na.omit()
+    
+    # Get threshold from current group's data (.x)
+    current_threshold <- .x$threshold[1]
+    current_quantile_level <- .x$quantile_level[1]
+    
+    if(nrow(current_data) == 0) {
+      return(tibble(
+        sensitivity = NA_real_,
+        specificity = NA_real_,
+        quantile_level = current_quantile_level,
+        true_positives = 0L,
+        false_negatives = 0L,
+        true_negatives = 0L,
+        false_positives = 0L,
+        n_users = 0L,
+        n_controls = 0L
+      ))
+    }
+    
+    calculate_metrics(
+      data = current_data, 
+      threshold = current_threshold,
+      quantile_level = current_quantile_level
+    )
+  })
+```
+
+
+```{r}
+results <-mutate(results, weighted_measure = ((sensitivity + 2 * specificity) / 3))
+
+which(results$weighted_measure == max(results$weighted_measure))
+
+results_max <- results |>
+  group_by(timepoint) |>
+  slice_max(order_by = weighted_measure, n = 1) |>
+  ungroup()
+  
+```
+
+
+Here we present our results 
+```{r}
+
+```
+
+
+
+```{r}
+
+
+```
+
+## Results & Discussion 
+
+## Conclusion

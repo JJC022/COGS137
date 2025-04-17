@@ -1,0 +1,408 @@
+---
+title: "CS02 - Predicting Annual Air Pollution"
+author: "Aliana Calpe, Arnav Raja, Jaden Clarke, Jiawei Gao, Sophie Chinn"
+output: 
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: show
+---
+
+## Introduction
+
+```{r setup, include=FALSE}
+# control global Rmd chunk settings
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE)
+```
+In today's world, pollution is at the forefront of ecological issues weighing on our planet and its future. However, air pollution stands out as one of the most seemingly severe sources of pollution in our environment, and more specifically in our atmosphere. Air pollution is one of the most pressing environmental issues of our time, posing significant threats to both human health and the natural environment. It refers to the presence of harmful substances in the air we breathe, including gases, particulates, and biological molecules, which can be natural or man-made. Rapid industrialization, urbanization, and population growth have led to a dramatic increase in the release of pollutants into the atmosphere, exacerbating the problem in many parts of the world. Air pollution affects everyone, often in ways that are invisible but no less dangerous. The consequences of air pollution are far-reaching, impacting not only human health but also ecosystems and the climate. Pollutants such as carbon monoxide, sulfur dioxide, nitrogen oxides, and particulate matter are linked to respiratory and cardiovascular diseases, as well as a host of other health issues (Cohen et al., 2005). Meanwhile, greenhouse gases like carbon dioxide and methane contribute to global warming, driving climate change and its associated challenges, such as rising sea levels and extreme weather events (United States Environmental Protection Agency, June 2024). 
+In response to these dangers of pollution, the Clean Air Act (CAA) was passed in 1970, giving the Environmental Protection Agency (EPA) power to enact strict guidelines on pollution (United States Environmental Protection Agency, July 2024). As a part of the CAA, PM 2.5 standards and monitoring methods have been integrated throughout the US to mitigate air pollution to maintain EPA guidelines. The EPA’s guidelines for pollution have evolved over the years, most recently lowering the PM 2.5 standard from 12 ug/m^3 to 9 ug/m^3 (United States Environmental Protection Agency, February 2024). 
+However, due to inadequate monitoring in areas of the country, the issue of a lack of accurate and comprehensive air pollution information persists. A study conducted by Wang et al. showed that 44% of urban areas, inhabited by 20 million people, are unaccounted for because of a lack of PM 2.5 monitoring (Wang et al. 2024). Notably, many of the areas with deficient monitoring have significantly higher populations of people of color and low-income individuals. This lack of monitoring means that these communities are underrepresented in identifying areas of high air pollution, and thus put at higher risk for exposure to unregulated air pollution. 
+The dataset that will be explored in this case study, collected by Roger D. Peng at Johns Hopkins School of Public Health, sheds light on air pollution monitoring concerns - namely, where monitors are located, how dense or sparse they are, and how their locations reflect disparities in air pollution monitoring equity. As stated in Wright et al.’s case study on this data, the monitors used for this data are the EPA’s gravimetric monitors, 90% of which are located in cities (Wright et al. 2020). Gravimetric monitors measure fine particulate in the air (PM 2.5) by mass of fine particles divided by volume of air (ug/m^3). 
+The variables in this dataset provide information on monitor location, including geographic coordinates, state, county, zip code, population, area, and population density. Also included are measurements of impervious surface (developed infrastructure such as parking lots) and number of primary and secondary roads within various vicinities of the monitors. The dataset also encompasses some demographic information for monitor locations, such as level of education, poverty rates, and urban-rural classification. Some other measurements of emissions in areas surrounding monitors are included as well - annual data on tons of emissions from major sources, estimated pollution values from CMAQ (predicted using atmospheric physics), aerosol optical depth from NASA. 
+With this data, we seek to answer the following question: With what accuracy can we predict US annual average air pollution concentrations? In this analysis, we are specifically focused on using machine learning to make accurate air pollution predictions in areas with low monitoring. Furthermore, we will extend this analysis to determine the extent to which wildfires can also be used to predict air pollution. 
+
+## Questions
+```{r Install package not included in datahb dependencies}
+
+#install.packages("RODBC")
+```
+
+
+### Load packages
+
+```{r load-packages, message=FALSE}
+
+library(tidyverse)
+library(ggplot2)
+library(tidymodels)
+library(olsrr)
+library(dplyr)
+library(RODBC)
+library(sf)
+```
+
+## The Data
+
+The data set that we will use is one that is a combination of data from multiple sources: US Environmental Protection Agency (EPA), National Aeronautics and Space Administration (NASA), US Census, and National Center for Health Statistics (NCHS) collected by a researched at Johns Hopkins School of Public Health who studied air pollution and climate change. It includes the value which represents the PM 2.5 measurements taken from EPA, measurements on environment from NASA, demographic information from the US Census, and other pollution data from NCHS. The data set has 876 observations and 50 features, with value being the variable we are creating a model from to predict.
+
+### Data Import
+
+To begin, we first imported our data from the `OCSdata` package on air pollution, specifically the `pm25_data.csv`.
+
+```{r}
+pm <- read_csv(r"{C:\Users\SmotP\Documents\COGS137\CS02\data\pm25_data.csv}")
+```
+
+### Data Wrangling
+
+Noticing differences in some of the names of the variables, we standardized the names so that they were all the same format to make it easier to analyze and look cleaner and more consistent.
+
+```{r}
+pm <- pm |> janitor::clean_names()
+```
+
+Then just to be sure, we used `distinct()` to get rid of any duplicate rows, if there are any.
+
+```{r}
+pm <- pm |>
+  distinct()
+```
+
+Next, we recoded the labels for the `urc2013` and `urc2006` variables to make it more descriptive and easier to interpret. Both variables were converted to factors and the factor levels were renamed to allow more meaningful descriptions.
+
+```{r}
+pm <- pm |> 
+  mutate(urc2013 = as.factor(urc2013)) |>  
+  mutate(urc2013 = fct_recode(urc2013, 
+                              "Totally Urban" = "1", 
+                              "Mostly Urban" = "2",
+                              "Urban-Rural Mix" = "3",
+                              "Mostly Rural" = "4",
+                              "Rural" = "5",
+                              "Completely Rural" = "6")) |> 
+  mutate(urc2013 = fct_relevel(urc2013, "Totally Urban", "Mostly Urban"))
+
+pm <- pm |> 
+  mutate(urc2006 = as.factor(urc2006)) |>  
+  mutate(urc2006 = fct_recode(urc2006, 
+                              "Totally Urban" = "1", 
+                              "Mostly Urban" = "2",
+                              "Urban-Rural Mix" = "3",
+                              "Mostly Rural" = "4",
+                              "Rural" = "5",
+                              "Completely Rural" = "6")) |> 
+  mutate(urc2006 = fct_relevel(urc2006, "Totally Urban", "Mostly Urban"))
+
+```
+
+For analysis, we created a copy of the `pm` dataset named `pm_factors` that has converted the columns, `id`, `fips`, and `zcta` into factors so that operations like ordering and grouping can be done. It groups the values of the variables into distinct levels, making it easier to work with and letting us see patterns that may exist.
+
+```{r}
+pm_factors <- pm |>
+  mutate(across(c(id, fips, zcta), as.factor)) 
+
+```
+
+Then, we split the dataset into training and testing sets as preparation for analysis. We set a random seed using `set.seed(1234)` so that the results of the split are the same when ran multiple times, which is important for consistency. We used the `rsample::initial_split()` function to divided two thirds of the data for training set and the rest into testing set.
+
+```{r}
+set.seed(1234)
+pm_split <- rsample::initial_split(data = pm, prop = 2/3)
+pm_split
+
+train_pm <- rsample::training(pm_split)
+test_pm <- rsample::testing(pm_split)
+
+```
+
+-may want to wrangle aod (measurement for pollution), we'll see
+
+Comments for EDA: if you need me to wrangle the data a certain way let me know, and i recoded ucr2013 and ucr2006 so it uses more descriptive labels but if in your analysis, having numerical values work better, i can change it back. :)
+
+## Analysis
+
+```{r}
+skimr::skim(pm)
+```
+Some EDA:
+1.Briefly check distribution of monitors.
+```{r}
+ggplot(pm, aes(x = lon, y = lat, color = cmaq)) +
+  geom_point(alpha = 0.7) +
+  scale_color_viridis_c() +
+  theme_minimal() +
+  labs(title = "Monitor Locations with CMAQ Levels", 
+       x = "Longitude", y = "Latitude", 
+       color = "CMAQ Levels")
+```
+
+
+2.Distribution of air pollution, which represented by PM2.5.
+```{r}
+pm |>
+  ggplot(aes(x = value)) +
+  geom_histogram(aes(y = ..density..), binwidth = 0.2, fill = "darkgreen", color = "black") +
+  geom_density(color = "red", size = 1, adjust = 1.5) +
+  labs(
+    title = "Distribution of PM2.5",
+    x = "PM2.5 Value",
+    y = "Density"
+  ) +
+  theme_minimal()
+```
+Right-skewed distribution, and the most PM2.5 values cluster near around the value of 12, while fewer values exist in the higher ranges.
+
+3.Boxplot for distribution of pollution across regions.
+```{r}
+ggplot(pm, aes(x = as.factor(urc2013), y = cmaq)) +
+  geom_boxplot(fill = "skyblue", alpha = 0.7) +
+  theme_minimal() +
+  labs(title = "CMAQ Levels by Urban and Rural Classification", x = "Urban or Rural", y = "CMAQ Levels")
+```
+PM2.5 value is generally higher in urban areas, with medians around or above 10. These areas also show some variability in pollution levels, but there are relatively fewer extreme outliers. CMAQ levels tend to decrease as areas become more rural, with lower medians and smaller ranges. “Rural” areas show the lowest levels of CMAQ and have slightly increase in “Completely Rural” area. The plot suggests a general trend of higher CMAQ levels in urban areas compared to rural ones. Urban areas typically have higher emissions due to industrial activity, transportation, and population density.
+
+4. Scatter plot of log distance to primary roads and PM2.5 value.
+```{r}
+ggplot(pm, aes(x = log_dist_to_prisec, y = value)) +
+  geom_point(alpha = 0.5,color = "darkgreen") +
+  geom_smooth(method = "lm", fullrange = TRUE, color = "orange", se = FALSE) +
+  theme_minimal() + 
+  labs(title = "PM2.5 Value vs. Log Distance to Primary Roads", 
+       x = "Log Distance to Primary Roads", 
+       y = "PM2.5 Value")
+```
+PM2.5 value is influenced by the distance from primary or secondary roads. This plot indicate that areas closer to roads having higher pollution levels. However, the spread of the points suggests that other factors, such as local industry or population density, also contribute to the variability in pollution levels.
+
+5.Scatter plot of poverty percentage and PM2.5 value.
+```{r}
+ggplot(pm, aes(x = pov, y = value)) +
+  geom_point(alpha = 0.7, color = "purple") +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +
+  theme_minimal() +
+  labs(title = "PM2.5 Value vs. Poverty", x = "Poverty Percentage", y = "PM2.5 value")
+```
+Poverty percentages may experience higher air pollution levels. This reflect socioeconomic disparities, where disadvantaged populations are more likely to reside in areas with greater exposure to pollution, such as near industrial facilities or busy roads. However, the weak correlation indicates that poverty percentage alone does not fully explain the variation in air pollution levels.
+
+6.Pair plots for educational levels and PM2.5 value.
+```{r}
+pm |>
+  select(value, nohs, somehs, hs, somecollege, bachelor, grad) |>
+  GGally::ggpairs()
+```
+Percentage of less-educated populations (nohs or somehs) tend to have slightly higher pollution levels. While there are trends in the data, the weak correlations suggest that other factors likely play a significant role in determining air pollution levels.
+
+7.Scatter plot of PM2.5 value and population density (ZCTA).
+```{r}
+ggplot(pm, aes(x = popdens_zcta, y = value)) +
+  geom_point(alpha = 0.7, color = "orange") +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +
+  theme_minimal() +
+  labs(title = "PM2.5 value vs. Population Density (ZCTA)", x = "Population Density (ZCTA)", y = "PM2.5 value")
+```
+There's no strong or clear linear relationship between Pm2.5 levels and population density.
+
+8. Scatter plot of PM2.5 value and impervious surface measure within a 5000-meter radius of the monitor.
+```{r}
+ggplot(pm, aes(x = imp_a5000, y = value)) +
+  geom_point(alpha = 0.7, color = "darkblue") +
+  geom_smooth(method = "lm", color = "red", se = FALSE) +
+  theme_minimal() +
+  labs(title = "PM2.5 value vs. Impervious Surface (5000m)", x = "Impervious Surface (5000m)", y = "PM2.5 value")
+```
+Impervious surface measures experience higher air pollution levels. This often correlates with increased emissions from vehicles, buildings, and industrial activities. However, the variability indicates that impervious surface alone does not fully explain air pollution levels.
+
+9. Correlation analysis of best impervious surface measure - here we will check the correlations between all of the measures of impervious surface seeing which radius gives us the storngest correaltion with the measured 2.5. THis suggests that imp_a5000, with a radium of 5 kiometers will be the most informative for our model. 
+```{r}
+impervious_surface_correlations <- pm|>
+  select(value, contains("imp"))|>
+  GGally::ggpairs()
+
+impervious_surface_correlations
+```
+10. Correlations measures for tons of emissions - here we examine the correlations between PM2.5 measurements and all of the measures for carbon emissions that we have. This plot suggests that the strongest correlation with the value comes from the variables with radius 1000.  
+```{r}
+
+emissions_correlations <- pm|>
+  select(value, contains("nei"))|>
+  GGally::ggpairs()
+
+emissions_correlations
+```
+
+Try the first linear regression.
+```{r}
+lm_1 <- lm(value ~ cmaq + imp_a5000 + log_dist_to_prisec + popdens_zcta + pov +
+                 nohs + somehs + bachelor + log_nei_2008_pm25_sum_10000, data = pm)
+summary(lm_1)
+```
+
+Try another linear regression.
+```{r}
+lm_2 <- lm(value ~ cmaq * log_dist_to_prisec + cmaq * imp_a5000 + 
+                     log_nei_2008_pm25_sum_10000 * imp_a5000 + bachelor, data = pm)
+summary(lm_2)
+```
+In order to identify ways that we could possibly improve our model we used olsrr's backward selection feature. According to the olsrr documentation, this technique iteratively removes predictors from the model until there are no features left to remove(Hebbali 2024). It's goalis to identify the effects of any potential confounds that would be inhibiting the predictive power of our model. The olsrr package features other tests to identify whether or not our set of features are a good fit for a linear model, but we chose to focus on this one as it is very results-oriented and gives easily interpretable and powerful recommendations for improving a model.  It seems that the ols_step_backward() function only displays those steps that actually improve the specified statistic, as in our analysis it only recommended 1 or 3 steps of removal depending on the model. 
+
+In order to measure whether the removal improves the model, we need a statistic measuring its performance. We chose r squared as our preferred performance metric. R squared tells us the amount of variance in the dataset that is explained by our collection of predictor variables. We think that this is a much better yardstick for performance than p value. While p value tells us how likely we would be to see results that are at least that extreme via random chance, we specifically need to determine how well our predictors explain the variation in our predictor. P values may tell us something about how reasonable our result seems, but that is insuffcient alone. 
+
+
+Here is our application of this method to our first linear model. 
+
+```{r}
+# Run backward analysis 
+refined_model_one <- ols_step_backward_adj_r2(lm_1)
+
+print(refined_model_one)
+
+```
+The backwards regression gives us three recommendations for variables to remove that would make the model more parsimonious. First it tells us that our total model is not very good at predicting PM2.5, only explaining around 27.4% of the variance we see. Nonetheless, olss recomends that we remove popdens_zcta (the population density of the zip code tabulation area), the poverty level, and the proportion of people who do not have a high school education. Each of these changes to the model wold only result in marginal improvements as measured by r squared. All three steps would only explain 1.72% more of the variance. While this isn't nothing, it seems pretty negligible. We would have liked to repeat this analysis using RMSE as our selection criteria, but olss does not support the functionality to do so. It seems that having an accuracy metric for our predictions would be important to inform public health decisions based on such a model. 
+
+Next, we repeated backwards regression with our model that accounts for interactions. 
+```{r}
+# Run backward analysis on the model that includes interactions
+refined_model_two <- ols_step_backward_adj_r2(lm_2)
+
+print(refined_model_two) 
+```
+We see that our second model performs slightly better than the first model from the get go. However, the OLS_step_backward summary only recommends removing one predictor; the interaction between the predictions from the cmaq model and the log distance to a road. This removal would only improve the R squared by .00078. Explaining 0.078% more of the variance in the data is certainly not a very significant improvement, so it appears that backwards regression is not a very effective technique for increasing the explanatory power of our model.
+
+While we have identified a strong method for ensuring that everything we include in our model is actually helping it to be the most parsimonious model it can be, we are not able to use this to significantly improve it's performance.Any additional refinements would likely come from introducing new predictors into the model. We will examine a potential lurking variable - the presence of wildfires. While this model has an r squared value that is 0.01017 greater than the first model, meaning it technically performs better, this would likely prove to be functionally meaningless when it comes to how informative this model could be for policymakers. 
+
+ 
+
+
+##Extension Question
+
+PM 2.5 (also referred to as fine particles) accounts for the largest portion of pollutants emitted by wildfires. In their study of the composition of wildfire smoke Vicente et al. found that "fine particles represented 91 ± 5.7% of the PM10 mass" (Vicente et al. 2013). A recent analysis published in **Nature** found that "wildfire smoke has influenced trends in average annual PM2.5 concentrations in nearly three-quarters of states in the contiguous USA". The authors also argue that the influence of wildfires on air quality will grow as the climate continues to warm. In light of this fact, incorporating the impact that wildfires have on PM2.5 emissions will likely improve the quality of our model. Given Burke et al.'s identification of wildfires as a crucial factor in overall PM2.5 levels, accounting for fire will enable our model to explain much more of the variance we see in this data. We expect this to greatly improve our chosen metric of model efficacy, R squared. 
+
+
+We settled on the Forest Service Research Data archive publication "Spatial wildfire occurrence data for the United States, 1992-2018" as our source to incorporate some wildfire data into the model.  This publication is part of the governments Fire Program Analysis. It incorporated data from various government databases to create a comprehensive record of fires in the given time period. It includes a bunch of information about what government body reported the fire, so we are using only a very small slice of it. The total database includes over 2.17 million records, of which we will only use 88,306. 
+
+
+note: the full dataset that we filtered is too large for datahub and I filtered it locally and then uploaded a csv that only has what we need for this analysis. I included the data wranging below nonetheless. 
+```{r *Load Fire Data*}
+
+fire_db_connection <- odbcConnectAccess2007(r"{C:\Users\SmotP\Documents\COGS137\CS02\RDS-2013-0009.5_Data_Format1_ACCDB\Data\FPA_FOD_20210617.accdb}")
+query<- "SELECT FIRE_YEAR, FIRE_SIZE, LATITUDE, LONGITUDE FROM Fires"
+fire_data <- sqlQuery(fire_db_connection, query)
+close(fire_db_connection) # important to preserve resources
+```
+***if you are on datahub comment out the code above and run the code below***
+```{r Load Fire Data Datahub }
+#fire_data <- read_csv(r"{C:\Users\SmotP\Documents\COGS137\CS02\filtered_data.csv}")
+
+```
+
+
+Our first steps are to filter this data to only include information that is relevant to our model. We only included the fire year, its size in acres, and its coordinates. This way we will be able to determine how sever the fire was and how close it was to a monitor.
+
+```{r *Filter Fire Data*}
+
+#rename columns and keep only relevant data
+fire_data <- fire_data|>
+  janitor::clean_names()|>
+  select(fire_year, fire_size, latitude, longitude)|>
+  filter(fire_year == "2008")
+```
+Because we do not have a common key on which we can merge our datasets, we must use location data to associate the fires with their nearest monitor. In order to do this we must create shapefiles for each dataset based on their latitude and longitude measurements. After we have done that we will be able to associate the fires with the monitors that would have detected their smoke. The library sf has specialized joins for geospatial objects, and in order to ensure we keep all of our data we are joining the fires with the nearest monitor available. Otherwise we would only have data for instances where a wildfire burned an air quality monitor, which the wildfire data is not robust enough to determine. 
+```{r Join fire data with air quality data}
+
+air_quality_sf <- st_as_sf(pm, coords = c("lon", "lat"), crs = 4326)
+fire_data_sf <- st_as_sf(fire_data, coords = c("longitude", "latitude"), crs = 4326)
+
+
+nearest_air <- st_nearest_feature(fire_data_sf, air_quality_sf)
+
+# Create merged dataset with distances
+merged_data <- st_join(fire_data_sf, air_quality_sf, join = st_nearest_feature, suffix = c(".fire", ".air"))|>
+  mutate(
+    distance_km = as.numeric(
+      st_distance(
+        geometry,  
+        st_geometry(air_quality_sf)[nearest_air],  
+        by_element = TRUE
+      )
+    ) / 1000  # Convert to kilometers
+  )
+
+```
+
+
+Now our linear models will be able to incorporate predictors which will account for the PM2.5 being released by wildfires. The beta value for our fire size variable will indicate the amount of PM2.5 expected per acre of fire. It is possible that we could model an interaction between fire size and the type of terrain that it is on, but this data will have to suffice. Here is a model which incorporates the fire data
+
+```{r Train Linear Model with Wildfire Predictors}
+
+model_with_fire <- lm(value ~ cmaq * log_dist_to_prisec + cmaq * imp_a5000 + 
+                     log_nei_2008_pm25_sum_10000 * imp_a5000 + bachelor + fire_size * distance_km, data = merged_data)
+
+#summary(model_with_fire)
+
+back_step_fire <- ols_step_backward_adj_r2(model_with_fire)
+
+back_step_fire
+
+```
+After training a linear model with one new predictor - the interaction between fire distance and size - the model actually became drastically worse. The difference was substantial, with the full model incorporating fire data having an r squared value 0.06363 lower than the best model we were able to produce.After removing the new feature the model was still not able to achieve the same level of performance as before. We theorize that this is because of the way that we merged the data. We sought to incorporate as much information as possible from the wildfire dataset, choosing to merge the air quality monitor information onto the wildfire dataset. This meant that we ran the model on a table of more than 88,000 records, each row representing a widlfire and the information for it's nearest air quality monitor. We had to join the tables based on the proximity of their entries because latitude and longitude were the only common keys and they were so precise that there was no chance that any of them would overlap. Perhaps if we filtered the wildfire data to only include fires that were larger than a certain threshold or closer to a monitor than a certain threshold then we would have better performance. We also expect that if we merged the wildfire data onto the monitor data, giving us a much smaller dataset where the monitor data does not repeat itself then we would have much better performance as well. 
+
+```{r urban environments performance}
+city_data <- pm|>
+  filter(urc2006 %in% c("Mostly Urban", "Totally Urban"))
+city_model <- lm(value ~ cmaq * log_dist_to_prisec + cmaq * imp_a5000 + 
+                     log_nei_2008_pm25_sum_10000 * imp_a5000 + bachelor, data = city_data)
+
+summary(city_model)
+```
+
+
+## Results & Discussion
+In the end, we were unable to produce a linear model that would give us satisfactory performance in predicting the amount of air pollution that a given PM2.5 monitor would see given our available predictors. While there are substantial avenues for exploration in improving this model, it seems unlikely that they would improve the model’s explanatory power enough to make it a very useful tool for public health. 
+
+Our best model had an r squared value of ~0.28, meaning that we were only able to explain ~28% of the variance we see in the target variable by writing a linear combination of our predictors. We also had a RMSE of ~2.5, which taken in context with the mean observed value of 10.8 indicates that on average our predictions were off by 23%. This indicates that our approach is in need of some serious improvement. 
+
+Despite our best attempts at feature selection and model refinement, we were unable to create a model that would give predictions that were very useful at all. Our discoveries suggest that there are considerable limitations on the effectiveness of using linear modeling to predict PM2.5 observations given this particular dataset. Our work leaves room for improvement, particularly with the incorporation of new predictors and with feature engineering. While we identified backwards regression as a useful tool for ensuring our predictors are all helping the model, the olss backwards regression was unable to do much to make our model more parsimonious. 
+
+Given our best efforts in exploratory analysis to select our predictors we fell short of explaining even 30% of the variance in our target variable. From this point we reached the conclusion that incorporating more predictors that would model more diverse sources of PM 2.5 would help our model. After incorporating a dataset that included wildfire data we actually made our model worse. There were issues with how we incorporated the wildfire data. Due to difficulties in joining disparate datasets we had to merge the monitor data with the closest wildfire. Doing this the other way around and pairing each monitor with the largest and closest wildfire would likely be much more effective. As it is currently, the model is likely inhibited by a preponderance of small, geographically remote wildfires as well as the duplication of monitor data. Additionally, were we to incorporate some kind of meteorological data we could identify interactions with weather conditions that mediate the PM2.5 created by a wildfire. 
+
+Another key avenue for overcoming our model’s limitations would be to find data that would support a model with much finer-grained temporal and spatial sensitivity. More successful models have done so, accounting for both regional, monthly, and meteorological variations across more than 10 years (Yanosly et al. 2014). They have been met with much greater success, though their model is better suited to some regions more so than others. There are numerous techniques they applied that our model does not include, as their model accounts for randomness of the predictors and smooths the observations to prevent overfitting. 
+
+
+## Conclusion
+
+  Being able to predict individual exposure levels to PM2.5 would be a massively valuable tool to public health professionals. Air pollution was not merely a problem in the past, and it still has wide ranging effects today. Unfortunately, the techniques deployed in this paper fall far short of providing such a tool. 
+While linear models are effective for exploring whether we can predict an outcome from a set of predictors, the question of air pollution is sufficiently complex that more sophisticated methods are needed. This is not to say that we should abandon the approach of linear modeling, but it is to say that incorporating more complex mathematical concepts from probability theory like Maximum Likelihood Estimation will make for a much more effective tool. 
+	While it would seem that we should be able to find a clear linear relationship between measures of pollution sources as accounted for in this dataset and the observed levels of PM2.5, our work indicates that making an effective prediction would require more sophisticated statistical approaches as well as more diverse data sources. We attempted to incorporate wildfire data under the hope that this would provide a more effective modeling tool in more rural environments, but we actually decreased the effectiveness of our model when we did so. 
+	We can see that PM2.5 prediction is a very different question depending on the environment. Yanosky et al. found that a model that makes effective predictions in one region may do rather poorly in another. It makes sense that PM2.5 would be a highly variable predictive problem, as PM2.5 encompasses broad categories of pollutants, so a model that would be effective in making national level predicitons would need to be specially tailored to account for regional differences in what is producing air pollution. 
+
+ ## References
+ 
+  Cohen, Aaron J., H. Ross Anderson, Bart Ostro, Kiran Dev Pandey, Michal Krzyzanowski, Nino Künzli, Kersten Gutschmidt, Arden Pope, Isabelle Romieu, Jonathan M. Samet & Kirk Smith (2005) The Global Burden of Disease Due to Outdoor Air Pollution, Journal of Toxicology and Environmental Health, Part A, 68:13-14, 1301-1307, DOI: 10.1080/15287390590936166 
+  
+  Burke, M., Childs, M.L., de la Cuesta, B. et al. The contribution of wildfire to PM2.5 trends in the USA. Nature 622, 761–766 (2023). https://doi.org/10.1038/s41586-023-06522-6
+
+  Hebbali A (2024). _olsrr: Tools for Building OLS Regression Models_. R package version 0.6.1,
+<https://CRAN.R-project.org/package=olsrr>.
+  
+  Pebesma, E., & Bivand, R. (2023). Spatial Data Science: With Applications in R. Chapman and Hall/CRC.
+https://doi.org/10.1201/9780429459016
+
+  Pebesma, E., 2018. Simple Features for R: Standardized Support for Spatial Vector Data. The R Journal 10
+(1), 439-446, https://doi.org/10.32614/RJ-2018-009
+
+  Short, Karen C. 2021. Spatial wildfire occurrence data for the United States, 1992-2018 [FPA_FOD_20210617]. 5th Edition. Fort Collins, CO: Forest Service Research Data Archive. https://doi.org/10.2737/RDS-2013-0009.5
+
+  United States Environmental Protection Agency. (2024, February 7). Final Rule to Strengthen the National Air Quality Health Standard for Particulate Matter Fact Sheet. EPA. https://www.epa.gov/system/files/documents/2024-02/pm-naaqs-overview.pdf 
+
+  United States Environmental Protection Agency (June 21, 2024)https://www.epa.gov/co-pollution/basic-information-about-carbon-monoxide-co-outdoor-air-pollution#Effects 
+
+  United States Environmental Protection Agency. (2024, July 31). Summary of the Clean Air Act. EPA. https://www.epa.gov/laws-regulations/summary-clean-air-act 
+
+  Vicente, Ana, et al. "Emission factors and detailed chemical composition of smoke particles from the 2010 wildfire season." Atmospheric Environment 71 (2013): 295-303.
+
+  Wang, Y., Marshall, J. D., & Apte, J. S. (2024). U.S. Ambient Air Monitoring Network has inadequate coverage under new PM2.5 standard. Environmental Science &amp; Technology Letters, 11(11), 1220–1226. https://doi.org/10.1021/acs.estlett.4c00605 
+
+  Wright, Carrie and Meng, Qier and Jager, Leah and Taub, Margaret and Hicks, Stephanie. (2020). https://github.com//opencasestudies/ocs-bp-air-pollution. Predicting Annual Air Pollution (Version v1.0.0).
+  
+  Yanosky, J.D., Paciorek, C.J., Laden, F. et al. Spatio-temporal modeling of particulate air pollution in the conterminous United States using geographic and meteorological predictors. Environ Health 13, 63 (2014). https://doi.org/10.1186/1476-069X-13-63
+
+
