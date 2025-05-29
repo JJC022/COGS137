@@ -1,0 +1,902 @@
+---
+title: "The New York City Housing Crisis: Quality and Quantity"
+author: "Aliana Calpe, Arnav Raja, Jaden Clarke, Jiawei Gao, Sophie Chinn
+"
+date: "2024-12-10"
+output: 
+  html_document:
+    toc: true
+    toc_float:
+      collapsed: true
+    theme: united
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(warning = FALSE, message = FALSE)
+
+```
+
+## Introduction
+
+Post-pandemic, many major US cities have been suffering from housing crises, namely, New York City. Rising costs and housing scarcity have contributed to a decrease in quality of life for New Yorkers, as well as increasing risks of housing insecurity. In February 2024, only 1.4% of rentals were available (Zaveri 2024), where typically 5-8% is an ideal vacancy rate (anything under 5% qualifying as a housing crisis). The vacancy rate was already under 5% before the pandemic and remained so during the pandemic - the rebound post-pandemic created a stress on housing demand that could not be met by the city. This has also driven up rent as well as aggravating the already present homelessness crisis. Because of this lack of resources, families and working class New Yorkers are being forced out of the city. Additionally, the burden of this crisis disproportionately affects people of color, with Hispanic, Black, and Asian New Yorkers being at least 1.5% more likely to be facing housing insecurity (Office of Budget Policy and Analysis 2024). 
+
+However, an especially pertinent component of this housing crisis is that much of the scarce housing available in New York City is of inadequate quality. While public policy has been focused on , housing quality and safety have largely been neglected. A lack of safety measures (which have proved fatal in fires), access to hot water and heat, and mold (Raudales 2024), have all been found rampant in low-income New York City housing - both private and public. 
+
+Once again, the brunt of this burden falls on people of color. The New York City Mayor’s Office of Climate Change and Environmental Justice found that historically redlined neighborhoods of New York City, which are predominantly inhabited by people of color, report the highest number of maintenance deficiencies in their housing (2024). Notably, nine out of the top ten neighborhoods that had three or more housing maintenance deficiencies were located in the Bronx. The failing quality of housing has major implications for its residents, particularly related to health. Poor housing quality has been shown to increase the likelihood of asthma, which is most prevalent in the Bronx, constituting 33% of asthma cases in the city (CHCP). 
+
+New York City publishes robust datasets detailing information about the vacant and occupied units in the city as well as the people who occupy them and the conditions of the units. We can take advantage of these datasets in order to examine the question of housing quality and factors driving it. In doing this, it is imperative to consider the disparities of housing quality for people of color in this dataset, given that research extensively shows the inequality that exists in housing for people of color in New York City. 
+
+The housing crisis in New York City is an urgent humanitarian issue. By exploring some of these variables in the dataset, we can gain a deeper understanding of what particular factors are driving housing quality issues in New York City and, in turn, find solutions to make New York City a more livable place for its residents.
+
+## Our Question
+
+How does housing availability and quality vary across different neighborhoods in New York City, and what factors contribute to these disparities?
+
+## Packages
+```{r load packages}
+library(tidyverse)
+library(tidymodels)
+library(ggplot2)
+library(tidytext)
+
+```
+
+## The Data
+
+The dataset that we are using came from the New York City Housing and Vacancy Survey (NYCHVS), which is a citywide, representative survey of New York City's housing and population. This dataset came from the 2021 survey done by the US Census Bureau. About 12,000 units throughout the city were surveyed using the 2020 July Master Address File (MAF) which makes sure that the data are representative of the entire residential units in the five boroughs of New York City, with each unit representing about 435 similar housing units.
+
+There are four datasets that the NYCHVS has released to the public and has all the data they have acquired. The all units dataset, occupied units dataset, person dataset, and vacant units dataset.
+
+The all units dataset contains data and information about the unit and building itself, like the size of the unit, the borough in which the unit is located, and the housing type. This dataset can be used to obtain the characteristics of the units and the overall amount of units surveyed.
+
+The occupied dataset has data about units that were occupied at the time the 2021 survey was conducted. It has information on the household, the unit, and the buildings that were occupied like how many people are in the household, how much rent they have to pay, how much utilities are, and more.
+
+The person dataset is data more on the individual answering the survey than the unit itself. It contains information on them like their age, gender, race/ethnicity, and work details. For this dataset, there is a record for each person in the unit.
+
+The vacant dataset has more on the units that were not occupied at the time of the survey, including units that were available for rent or for sale and those that were not. This dataset has data on vacancy length, asking price or rent of the unit, and what the last rent was before it became vacant.
+
+All these datasets have one column in common, which is control. Through this column, we are able to combine the four datasets into one. Control is the numeric identifier for each housing unit.
+
+The user guide and codebook for the datasets can be found at:
+
+<https://www2.census.gov/programs-surveys/nychvs/technical-documentation/record-layouts/2021/2021_NYCHVS_PUF_User_Guide_and_Codebook.pdf>
+
+## Data Import / Wrangling
+
+To start off, we imported our four datasets and assigned them variable names.
+
+```{r load data}
+#the following filepaths are for jaden's computer. To use the paths on datahub comment these out and uncomment the ones below (highlight and hit ctl + shift + c)
+filepaths <- c(
+r"{C:\Users\SmotP\Downloads\occupied_puf_21.csv}",
+r"{C:\Users\SmotP\Downloads\allunits_puf_21.csv}",
+r"{C:\Users\SmotP\Downloads\vacant_puf_21.csv}",
+r"{C:\Users\SmotP\Downloads\person_puf_21.csv}"
+)
+ filepaths <- c(
+ r"{occupied_puf_21.csv}",
+ r"{allunits_puf_21.csv}",
+ r"{vacant_puf_21.csv}",
+ r"{person_puf_21.csv}"
+ )
+occupied_data <- read.csv(filepaths[1])
+all_units_data <- read.csv(filepaths[2])
+vacant_data <- read.csv(filepaths[3])
+person_data <- read.csv(filepaths[4])
+
+```
+Here, we recoded the labels for some of the columns across all four datasets to improve clarity and more efficient interpretation. Since the original column labels were integers, understanding their meaning required referencing the guidebook. So to make the data more intuitive and allow for detailed data analysis, we recoded the columns that we felt needed more descriptive labels. This step makes the data easier to work with during analysis, reduces potential for errors, and be more understandable in communicating what our results are. Some columns we decided need recoding are the boro column from the all units dataset to make the labels the names of the actual boroughs instead of the number that represents them, the type of tenure in the occupied dataset, and more. In this, as we have over 400 columns for the datasets combined, we also combined columns that have similar information like combining all the ocunts of diabilities in a household or how much debt the household acquired to make the datasets easier to work with and lessen the amount of columns needed for analysis.
+
+The code for recoding the survey data was provided by ChatGPT and was added to / edited by members of the team
+```{r Recode AllUnits, echo = FALSE}
+library(haven)
+
+# Function to recode and transform survey data
+refactor_allunits <- function(data) {
+  data |>
+    # Recode BORO (Borough)
+    mutate(boro = factor(boro, 
+                         levels = c(1, 2, 3, 4, 5),
+                         labels = c("Bronx", "Brooklyn", "Manhattan", "Queens", "Staten Island")))|>
+    
+    # Recode OCC (Occupancy Status)
+    mutate(occ = factor(occ, 
+                        levels = c(1, 2, 3, 4),
+                        labels = c("Occupied", 
+                                   "Vacant, available for rent", 
+                                   "Vacant, available for sale only", 
+                                   "Vacant, not available for rent or sale")))|>
+    
+    # Recode CSR (Housing Type)
+    mutate(csr = factor(csr, 
+                        levels = c(2, 3, 4, 5, 6, 12, 32, 80, 90, 96, 97),
+                        labels = c("Owner occupied private cooperative",
+                                   "Vacant for sale",
+                                   "Vacant, not available for rent or sale",
+                                   "Public housing",
+                                   "Owner occupied, other",
+                                   "Owner occupied, condo",
+                                   "Rent stabilized",
+                                   "Private, unregulated renter",
+                                   "Rent controlled",
+                                   "Other regulated, owner",
+                                   "Other regulated, renter")))|>
+    
+    # Recode CONDOCOOP (Cooperative/Condominium Status)
+    mutate(condocoop = factor(condocoop, 
+                              levels = c(-1, 1, 2, 3),
+                              labels = c("Not reported", 
+                                         "Condo", 
+                                         "Coop", 
+                                         "Neither condo nor coop")))|>
+    
+    # Recode STORIES (Number of Stories)
+    mutate(stories = factor(stories, 
+                            levels = c(1, 2, 3, 4, 5, 6, 7),
+                            labels = c("1 to 2 stories", 
+                                       "3 stories", 
+                                       "4 stories", 
+                                       "5 stories", 
+                                       "6 to 10 stories", 
+                                       "11 to 20 stories", 
+                                       "21 stories or more")))|>
+    
+    # Recode ELEVATOR (Elevator Presence)
+    mutate(elevator = factor(elevator, 
+                             levels = c(1, 2),
+                             labels = c("Has an elevator", 
+                                        "Does not have an elevator")))|>
+    
+    # Recode UNITS (Residential Units)
+    mutate(units = factor(units, 
+                          levels = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
+                          labels = c("1 unit", 
+                                     "2 units", 
+                                     "3 units", 
+                                     "4 to 5 units", 
+                                     "6 to 9 units", 
+                                     "10 to 12 units", 
+                                     "13 to 19 units", 
+                                     "20 to 49 units", 
+                                     "50 to 99 units", 
+                                     "100 units or more")))|>
+    
+    # Recode UNIT_FLOOR (Floor of Housing Unit)
+    mutate(unit_floor = factor(unit_floor, 
+                               levels = c(-2, -1, 0, 1, 2, 3, 4, 5, 6, 7),
+                               labels = c("Not applicable (one story building)", 
+                                          "Not reported", 
+                                          "Basement", 
+                                          "1st floor", 
+                                          "2nd floor", 
+                                          "3rd floor", 
+                                          "4th floor", 
+                                          "5th to 10th floor", 
+                                          "11th to 20th floor", 
+                                          "21st floor or above")))|>
+    
+    # Recode UNIT_ONEPLUSFLIGHT (Stairs to Reach Unit)
+    mutate(unit_oneplusflight = factor(unit_oneplusflight, 
+                                       levels = c(-1, 1, 2),
+                                       labels = c("Not reported", 
+                                                  "One or more flight required to reach the unit", 
+                                                  "Less than one flight is required to reach the unit")))|>
+    
+    # Recode ELEV_NO_STEPS (Elevator Accessibility)
+    mutate(elev_no_steps = factor(elev_no_steps, 
+                                  levels = c(1, 2, 3),
+                                  labels = c("No steps required to reach elevator", 
+                                             "Steps required to reach elevator", 
+                                             "Building does not have elevator")))|>
+    
+    # Recode UNIT_NO_STEPS (Unit Accessibility)
+    mutate(unit_no_steps = factor(unit_no_steps, 
+                                  levels = c(1, 2),
+                                  labels = c("No steps required to reach unit", 
+                                             "Steps required to reach unit")))|>
+    
+    # Recode YEARBUILT (Year Building Built)
+    mutate(yearbuilt = factor(yearbuilt, 
+                              levels = c(1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11),
+                              labels = c("1900 or earlier", 
+                                         "1901 to 1919", 
+                                         "1920 to 1929", 
+                                         "1930 to 1946", 
+                                         "1947 to 1959", 
+                                         "1960 to 1973", 
+                                         "1974 to 1979", 
+                                         "1980 to 1989", 
+                                         "1990 to 1999", 
+                                         "2000 to 2009", 
+                                         "2010 or later")))|>
+    
+    # Recode BEDROOMS (Number of Bedrooms)
+    mutate(bedrooms = factor(bedrooms, 
+                             levels = c(0, 1, 2, 3, 4, 5, 6),
+                             labels = c("0 bedrooms", 
+                                        "1 bedroom", 
+                                        "2 bedrooms", 
+                                        "3 bedrooms", 
+                                        "4 bedrooms", 
+                                        "5 bedrooms", 
+                                        "6 or more bedrooms")))|>
+    
+    # Recode ROOMS (Number of Rooms)
+    mutate(rooms = factor(rooms, 
+                          levels = c(1, 2, 3, 4, 5, 6, 7, 8),
+                          labels = c("1 room", 
+                                     "2 rooms", 
+                                     "3 rooms", 
+                                     "4 rooms", 
+                                     "5 rooms", 
+                                     "6 rooms", 
+                                     "7 rooms", 
+                                     "8 or more rooms")))|>
+    
+    # Recode FULLBATH_NUM (Full Bathrooms)
+    mutate(fullbath_num = factor(fullbath_num, 
+                                 levels = c(0, 1, 2, 3),
+                                 labels = c("0 full bathrooms", 
+                                            "1 full bathroom", 
+                                            "2 full bathrooms", 
+                                            "3 or more full bathrooms")))|>
+    
+    # Recode HALFBATH_NUM (Half Bathrooms)
+    mutate(halfbath_num = factor(halfbath_num, 
+                                 levels = c(0, 1, 2),
+                                 labels = c("0 half bathrooms", 
+                                            "1 half bathroom", 
+                                            "2 or more half bathrooms")))
+}
+
+
+```
+```{r Recode allocation flags, echo = FALSE}
+# Function to handle allocation flags. Provided by microsoft co-pilot 
+handle_allocation_flags <- function(data) {
+  data |>
+    mutate(
+      stories_allocated = ifelse(i_stories == 1, TRUE, FALSE),
+      elev_no_steps_allocated = ifelse(i_elev_no_steps == 1, TRUE, FALSE),
+      unit_no_steps_allocated = ifelse(i_unit_no_steps == 1, TRUE, FALSE),
+      rooms_allocated = ifelse(i_rooms == 1, TRUE, FALSE),
+      bedrooms_allocated = ifelse(i_bedrooms == 1, TRUE, FALSE),
+      fullbath_num_allocated = ifelse(i_fullbath_num == 1, TRUE, FALSE),
+      halfbath_num_allocated = ifelse(i_halfbath_num == 1, TRUE, FALSE)
+    )
+}
+
+```
+
+```{r Recode Vacant, echo = FALSE}
+
+refactor_vacant <- function(data) {
+  # Recode FIRSTOCC (First Occupancy)
+  data$firstocc <- factor(data$firstocc, 
+                          levels = c(-1, 1, 2),
+                          labels = c("Not Reported", "First Occupancy", "Previously Occupied"))
+  
+  # Recode REASON_NOTAVAIL (Reason Housing Unit Not Available)
+  data$reason_notavail <- factor(data$reason_notavail, 
+                                 levels = c(-2, -1, 1, 2, 3, 4, 5, 6, 7, 8),
+                                 labels = c(
+                                   "Not Applicable (Unit Available)",
+                                   "Not Reported", 
+                                   "Rented/Sold, Not Yet Occupied",
+                                   "Awaiting/Undergoing Renovation", 
+                                   "Occasional/Seasonal/Recreational Use",
+                                   "Additional Reasons",
+                                   "Held as Vacant",
+                                   "Dilapidated/Uninhabitable",
+                                   "Held for Other Reasons",
+                                   "Two or More Reasons Reported"
+                                 ))
+  
+  # Recode OWN (Tenure of Previous Resident)
+  data$own <- factor(data$own, 
+                     levels = c(-2, -1, 1, 2),
+                     labels = c(
+                       "Not Applicable (No Previous Occupant)",
+                       "Not Reported", 
+                       "Previous Occupant Was Owner", 
+                       "Previous Occupant Was Renter"
+                     ))
+  
+  # Handle LASTRENT (Rent Paid by Previous Resident)
+  # Create a new variable that handles the topcode situation
+  data$lastrent_clean <- ifelse(data$lastrent == -2, NA,
+                        ifelse(data$lastrent == -1, NA,
+                        ifelse(data$lastrent == 7728, 13708, 
+                               data$lastrent)))
+  
+  # Recode VAC_LENGTH (Length of Time Unit Unoccupied)
+  data$vac_length <- factor(data$vac_length, 
+                            levels = c(-2, -1, 1, 2, 3, 4, 5, 6),
+                            labels = c(
+                              "Not Applicable (Held for Occasional Use)",
+                              "Not Reported",
+                              "Less than 1 month", 
+                              "1 to 2 months", 
+                              "2 to 3 months", 
+                              "3 to 6 months", 
+                              "6 to 12 months", 
+                              "12 months or longer"
+                            ))
+  
+  # Recode ASKINGRENT (Asking Rent Categories)
+  data$askingrent <- factor(data$askingrent, 
+                            levels = c(-2, 1, 2, 3, 4, 5),
+                            labels = c(
+                              "Not Applicable (Unit Not Available for Rent)",
+                              "$1 to $1,499",
+                              "$1,500 to $2,299", 
+                              "$2,300 to $3,099", 
+                              "$3,100 to $3,899", 
+                              "$3,900 or more"
+                            ))
+  
+  # Recode ASKINGPRICE (Asking Price Categories)
+  data$askingprice <- factor(data$askingprice, 
+                             levels = c(-2, 1, 2, 3, 4),
+                             labels = c(
+                               "Not Applicable (Not Available for Sale)",
+                               "$1 to $299,999",
+                               "$300,000 to $599,999", 
+                               "$600,000 to $899,999", 
+                               "$900,000 or more"
+                             ))
+  
+  # Recode Allocation Flags
+  data$i_askingrent <- factor(data$i_askingrent, 
+                              levels = c(0, 1),
+                              labels = c("Reported", "Allocated"))
+  
+  data$i_askingprice <- factor(data$i_askingprice, 
+                               levels = c(0, 1),
+                               labels = c("Reported", "Allocated"))
+  
+  return(data)
+}
+```
+
+```{r Recode Occupied, echo = FALSE}
+
+refactor_occupied <- function(occupied_data) {
+  occupied_data$rent_expenditure <- occupied_data$hhinc_rec1  / occupied_data$rent_amount
+  
+  occupied_data$receives_assistance <- with(occupied_data, rentassist | rentassist_voucher)
+  
+  occupied_data$total_rent_cost <- with(occupied_data, rent_amount + rentfees_amount)
+  
+  occupied_data$crowding <- with(occupied_data, pmax(crowd_bdrm, crowd_rm, na.rm = TRUE))
+  
+  
+  occupied_data$tenure <- recode(occupied_data$tenure,
+                                    '1' = "Renter",
+                                    '2' = "Owner")
+  
+  occupied_data$foodinsecure <- recode(occupied_data$foodinsecure,
+                                    '-1' = "Not reported",
+                                    '1' = "Not insecure",
+                                    '2' = "Insecure",
+                                    '3' = "Vey insecure")
+  
+  occupied_data$rentburden_cat <- recode(occupied_data$rentburden_cat,
+                                    '-2' = "Not applicable",
+                                    '1' = "Severely burdened",
+                                    '2' = "Moderately burdened",
+                                    '3' = "Not burdened",
+                                    '4' = "Means-tested housing")
+  occupied_data$musty_freq <- factor(occupied_data$musty, 
+                          levels = c(-3, -1, 1, 2, 3, 4, 0),
+                          labels = c("Not Applicable", "Not Reported", 
+                                     "Daily", "Weekly", "Monthly", 
+                                     "Few Times", "Never"))
+  
+  # Elevator Breakdown Recoding
+  occupied_data$elevator_status <- factor(occupied_data$elevator_brok, 
+                                 levels = c(-3, -2, -1, 1, 0),
+                                 labels = c("Not Lived Last Year", 
+                                            "No Elevator", 
+                                            "Not Reported", 
+                                            "Broken 6+ Hours", 
+                                            "Worked Continuously"))
+  
+  # Rodents in Unit Recoding
+  occupied_data$rodents_unit <- factor(occupied_data$rodents_unit, 
+                              levels = c(-3, 1, 0),
+                              labels = c("Not Lived Last 3 Months", 
+                                         "Rodents Present", 
+                                         "No Rodents"))
+  
+  # Rodents in Building Recoding
+  occupied_data$rodents_building <- factor(occupied_data$rodents_build, 
+                                  levels = c(-3, -2, 1, 0),
+                                  labels = c("Not Lived Last 3 Months", 
+                                             "Not Applicable", 
+                                             "Rodents Present", 
+                                             "No Rodents"))
+  
+  # Toilet Breakdown Recoding
+  occupied_data$toilet_status <- factor(occupied_data$toilet_brok, 
+                               levels = c(-3, -2, 1, 0),
+                               labels = c("Not Lived Last 3 Months", 
+                                          "No Toilet", 
+                                          "All Toilets Not Working", 
+                                          "Toilets Working"))
+  
+  # Roaches Number Recoding
+  occupied_data$roaches_count <- factor(occupied_data$roaches_num, 
+                               levels = c(-3, -1, 0, 2, 3, 4),
+                               labels = c("Not Lived Last Month", 
+                                          "Not Reported", 
+                                          "None", 
+                                          "1-5 Roaches", 
+                                          "6-19 Roaches", 
+                                          "20+ Roaches"))
+  
+  # Structural Defects Recoding
+  occupied_data$wall_holes <- factor(occupied_data$wallholes, 
+                            levels = c(1, 2),
+                            labels = c("Holes Present", "No Holes"))
+  
+  occupied_data$floor_holes <- factor(occupied_data$floorholes, 
+                             levels = c(1, 2),
+                             labels = c("Holes Present", "No Holes"))
+  
+  occupied_data$peeling_paint <- factor(occupied_data$peelpaint, 
+                               levels = c(1, 2),
+                               labels = c("Peeling Paint/Broken Plaster", 
+                                          "No Peeling Paint"))
+  
+  occupied_data$large_peeling_paint <- factor(occupied_data$peelpaint_large, 
+                                     levels = c(-2, 1, 2),
+                                     labels = c("Not Applicable", 
+                                                "Large Section Present", 
+                                                "No Large Section"))
+  
+  # Maintenance Deficiency Count Recoding
+  occupied_data$maintenance_deficiency_count <- factor(occupied_data$mdefcount, 
+                                              levels = c(-1, 0:7),
+                                              labels = c("Not Computed", 
+                                                         "No Deficiencies", 
+                                                         "1 Deficiency", 
+                                                         "2 Deficiencies", 
+                                                         "3 Deficiencies", 
+                                                         "4 Deficiencies", 
+                                                         "5 Deficiencies", 
+                                                         "6 Deficiencies", 
+                                                         "7 Deficiencies"))
+
+  return(occupied_data)
+}
+```
+
+```{r Recode Person, echo = FALSE}
+refactor_person_data <- function(person_data){
+  person_data$total_debt <- person_data$debt_student_cat_p + 
+                 person_data$debt_car_cat_p + 
+                 person_data$debt_family_cat_p + 
+                   person_data$debt_credit_cat_p + 
+                   person_data$debt_medical_cat_p
+  
+  person_data$disability <- person_data$disability <- apply(person_data[, c("control", "dear_p", "deye_p", "drem_p", "dphy_p", "ddrs_p", "dout_p")], 1, function(row) any(row == TRUE, na.rm = TRUE))
+  
+  person_data$gender_p <- recode(person_data$gender_p,
+                                      '1' = "Male",
+                                      '2' = "Female",
+                                      '3' = "Other")
+  
+  person_data$maritalstat_p <- recode(person_data$maritalstat_p,
+                                      '-2' = "Not Applicable",
+                                      '-1' = "Not Reported",
+                                      '1' = "Married",
+                                      '2' = "Divorced",
+                                      '3' = "Separated",
+                                      '4' = "Widowed",
+                                      '5' = "Never Married")
+  
+  person_data$spouse_p <- recode(person_data$spouse_p,
+                                      '-2' = "Not Applicable",
+                                      '1' = "Yes, a spouse in the household",
+                                      '2' = "Yes, an unmarried partner in the household",
+                                      '3' = "No spouse or partner in the household")
+  
+  
+  person_data$spouse_res_p <- recode(person_data$spouse_res_p,
+                                      '-2' = "Not Applicable",
+                                      '1' = "With responded",
+                                      '2' = "Somewhere else")
+  
+  person_data$raceeth_p <- recode(person_data$raceeth_p,
+                                      '1' = "White alone, non-Hispanic",
+                                      '2' = "Black alone, non-Hispanic",
+                                      '3' = "Hispanic",
+                                      '4' = "Asian alone, non-Hispanic",
+                                      '5' = "Indigenous or Pacific Islander",
+                                      '6' = "Multiracial")
+  
+  person_data$edattain_p <- recode(person_data$edattain_p,
+                                      '-2' = "Not applicable",
+                                      '1' = "No school completed",
+                                      '2' = "1st to 6th grade",
+                                      '3' = "7th to 9th grade",
+                                      '4' = "10th to 12th grade but no high school diploma",
+                                      '5' = " High school diploma, GED, or equivalent",
+                                      '6' = "Some college, not 4-year degree ",
+                                      '7' = "Bachelor's degree",
+                                      '8' = "Master's degree",
+                                      '9' = "Professional or doctorate degree")
+return(person_data)
+}
+
+
+```
+
+
+
+
+We used janitor to get the column names into a more usable format and to ensure that each column follows the same format for clarity and easier readability.
+
+```{r clean label names}
+
+occupied_data <- occupied_data |> janitor::clean_names()
+all_units_data <- all_units_data |> janitor::clean_names()
+vacant_data <- vacant_data |> janitor::clean_names()
+person_data <- person_data |> janitor::clean_names()
+
+```
+
+This code applies the data-wrangling functions to clean and preprocess the four datasets. Each function performs transformations tailored to each dataset that was written in the above codes. These transformations includes recoding values, reorganizing columns for clarity, and converting numeric values into more meaningful categorical labels. By using the wrangling functions, we make sure that the datasets are in a ready to be analyzed with detailed descriptions.
+
+```{r Use wrangling functions}
+
+all_units_data <- refactor_allunits(all_units_data)
+vacant_data <- refactor_vacant(vacant_data)
+occupied_data <- refactor_occupied(occupied_data)
+person_data <- refactor_person_data(person_data)
+```
+
+
+After we recoded and wrangles each dataset, we combined all four into a single dataset to be used for analysis.
+```{r Unify Data}
+
+combined_data <- merge(occupied_data, all_units_data, by = "control", all = TRUE)
+
+combined_data <- merge(combined_data, vacant_data, by = "control", all = TRUE)
+
+combined_data <- merge(combined_data, person_data, by = "control", all = TRUE)
+
+```
+
+At this point, the dataset is ready but while wrangling, we realized that some columns are not necessary for answering our question of how housing availability and quality vary across different neighborhoods and what factors contribute to these, so we dropped those columns by selecting what specific columns we wanted to analyze further.
+```{r Remove Unnecesary columns}
+
+combined_data <- combined_data|>
+  select(control, tenure, hhfirstmovein, control, gender_p, maritalstat_p, spouse_p, spouse_res_p, raceeth_p, edattain_p, movein_p, race_p, disability, boro, occ, csr, condocoop, stories, elevator, units, unit_floor, unit_oneplusflight, elev_no_steps, unit_no_steps, yearbuilt, bedrooms, rooms, fullbath_num, halfbath_num, firstocc, reason_notavail, own, lastrent_clean, vac_length, askingrent, askingprice, i_askingrent, i_askingprice, rent_expenditure, rent_amount, disability, receives_assistance, total_rent_cost, total_debt, tenure, foodinsecure, rentburden_cat, total_debt, disability, gender_p, maritalstat_p, spouse_p, spouse_res_p,raceeth_p, edattain_p, musty_freq, elevator_status, rodents_unit, rodents_building, toilet_status, roaches_count, wall_holes, floor_holes, peeling_paint, large_peeling_paint, maintenance_deficiency_count, hhpoverty, hhsize, crowding)
+
+
+```
+
+## EDA
+```{r }
+print(unique(combined_data$rentburden_cat))
+print(unique(combined_data$hhpoverty))
+# range of poverty is 0 (0.5%) to 250 (250% and more).
+```
+
+```{r EDA of household size, rent burden, poverty status, and utility interruptions}
+# Summary statistics of household size, rent burden, poverty status, and utility interruptions
+Poverty_threshold <- 100 # median value from range of poverty
+
+combined_stats <- combined_data |>
+  filter(hhpoverty != "Not applicable",) |>
+  group_by(boro) |>
+  summarize(
+    avg_household_size = mean(hhsize, na.rm = TRUE),
+    avg_rent_burden = mean(rent_expenditure, na.rm = TRUE),
+    percent_poverty = mean(hhpoverty <= Poverty_threshold, na.rm = TRUE) * 100,
+  )
+
+print(combined_stats)
+```
+
+```{r}
+
+# Visualize household size across boroughs
+ggplot(combined_data, aes(x = boro, y = hhsize, fill = boro)) +
+  geom_boxplot() +
+  labs(title = "Household Size by Borough", x = "Borough", y = "Household Size", fill = 'Borough') +
+  theme_minimal()
+```
+
+```{r}
+
+ggplot(combined_data |> filter( rentburden_cat != "Not applicable"), aes(x = boro, fill = rentburden_cat)) +
+  geom_bar(position = "fill") +
+  labs(
+    title = "Rent Burden Categories by Borough", 
+    x = "Borough", 
+    y = "Proportion", 
+    fill = "Rent Burden"
+  ) +
+  theme_minimal()
+
+```
+
+Housing quality summary
+
+```{r}
+
+names <- c("noheat", "nohotwater", "leaks", "mold", "musty", "elevator_brok", "elevator_allbrok", "rodents_unit", "rodents_build", "toilet_brok", "wallholes", "floorholes", "peelpaint", "peelpaint_large") 
+included_names <- c() 
+for(name in names) { 
+  if (name %in% names(combined_data)) { 
+    included_names <- append(included_names, name)
+    } 
+} 
+print(included_names)
+```
+
+```{r}
+
+# Average number of housing issues by borough
+combined_data$housing_issues <- rowSums(combined_data[, c("musty_freq", "elevator_status", "rodents_unit", "rodents_building", "toilet_status", "roaches_count", "wall_holes", "floor_holes", "peeling_paint", "large_peeling_paint")] != c(-1, -2, 0), na.rm = TRUE)
+housing_quality_summary <- combined_data |>
+  group_by(boro) |>
+  summarize(
+    avg_housing_issues = mean(housing_issues, na.rm = TRUE),
+    percent_significant_issues = mean(housing_issues > 6, na.rm = TRUE) * 100
+  )
+
+print(housing_quality_summary)
+```
+
+```{r}
+
+# Visualize housing issues across boroughs
+ggplot(combined_data, aes(x = boro, y = housing_issues, fill = boro)) +
+  geom_boxplot() +
+  labs(title = "Housing Issues by Borough", x = "Borough", y = "Number of Issues", fill = 'Borough') +
+  theme_minimal()
+```
+Crowding and household size
+
+```{r}
+
+# Summary of crowding by borough
+crowding_summary <- combined_data |>
+  filter(crowding != -2) |>
+  group_by(boro) |>
+  summarize(
+    avg_crowding = mean(crowding, na.rm = TRUE),
+    overcrowded_percent = mean(crowding < 3, na.rm = TRUE) * 100,
+    avg_household_size = mean(hhsize, na.rm = TRUE)
+  )
+
+print(crowding_summary)
+```
+
+Food insecurity
+
+
+```{r}
+
+# Summary of food insecurity and utility interruptions by borough
+food_insecurity_summary <- combined_data |>
+  filter(foodinsecure != "Not reported") |>
+  group_by(boro) |>
+  summarize(
+    food_insecure_percent = mean(foodinsecure == "Insecure" | foodinsecure == "Very insecure", na.rm = TRUE) * 100,
+  )
+
+print(food_insecurity_summary)
+```
+
+
+```{r}
+# Visualize food insecurity by borough
+ggplot(
+  combined_data |> 
+    filter(foodinsecure != "Not reported"), 
+  aes(x = boro, fill = foodinsecure)
+) +
+  geom_bar(position = "fill") +
+  labs(
+    title = "Food Insecurity by Borough", 
+    x = "Borough", 
+    y = "Proportion", 
+    fill = "Food Insecurity Level"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+```{r}
+# Statistics of occ
+occ_summary <- combined_data |> 
+  filter(
+    hhpoverty != -2, 
+    rentburden_cat != "Not applicable", 
+    crowding != -2, 
+    foodinsecure != "Not reported"
+  ) |> 
+  group_by(occ) |> 
+  summarize(
+    avg_rentpaid = mean(rent_amount, na.rm = TRUE),
+    avg_housing_issues = mean(housing_issues, na.rm = TRUE),
+    avg_crowding = mean(crowding, na.rm = TRUE),
+    avg_hhsize = mean(hhsize, na.rm = TRUE)
+  )
+
+print(occ_summary)
+
+```
+```{r}
+
+# Bar plot for occupancy status by borough
+ggplot(combined_data, aes(x = boro, fill = occ)) +
+  geom_bar(position = "fill") +
+  labs(
+    title = "Proportion of Occupied and Vacant Units by Borough",
+    x = "Borough",
+    y = "Proportion",
+    fill = "Occupancy Status"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+## Analysis
+```{r PCA prep}
+
+# Specify the columns to include in the PCA
+housing_quality <- combined_data |>
+  select(c("musty_freq", "elevator_status", "rodents_unit", "rodents_building", "toilet_status", "roaches_count", "wall_holes", "floor_holes", "peeling_paint", "large_peeling_paint", "boro"))|>
+  drop_na()|>
+  mutate(row_id = row_number()) |>
+  mutate(across(c("musty_freq", "elevator_status", "rodents_unit", "rodents_building", "toilet_status", "roaches_count", "wall_holes", "floor_holes", "peeling_paint", "large_peeling_paint", "boro"), 
+                ~ as.numeric(as.factor(.))))
+  
+  
+
+housing_quality_cols <-  c("musty_freq", "elevator_status", "rodents_unit", "rodents_building", "toilet_status", "roaches_count", "wall_holes", "floor_holes", "peeling_paint", "large_peeling_paint", "boro")
+row_indices <- housing_quality$row_id
+
+```
+
+```{r perform PCA and view raw results}
+# Create a recipe for PCA
+
+pca_recipe <- recipe(~ ., data = housing_quality) |>
+  update_role(all_of(housing_quality_cols), new_role = "predictor") |>
+  update_role(c(row_id, boro), new_role = "id")|>
+  step_normalize(all_predictors()) |>
+  step_pca(all_predictors(), num_comp = 5) 
+
+
+# Prepare the recipe
+pca_prep <- prep(pca_recipe)
+
+# Apply the recipe to the data
+pca_baked <- bake(pca_prep, new_data = NULL)
+
+# Extract PCA loadings and variance
+pca_loadings <- tidy(pca_prep, number = 2)
+
+# Extract PCA scores
+pca_scores <- pca_baked |>
+  select(starts_with("PC"))
+
+#combine scores with data
+combined_data_pca <- combined_data[row_indices, ] |>
+  bind_cols(pca_scores)
+
+# View the results
+#head(combined_data_pca)
+
+```
+
+
+The following plots were generated using code from https://juliasilge.com/blog/cocktail-recipes-umap/. The article was also a guide on how we interpreted the results of the analysis in the context of our dataset
+```{r Visualize Components}
+tidied_pca <- tidy(pca_prep, 2)
+
+tidied_pca |>
+  filter(component %in% paste0("PC", 1:5)) |>
+  mutate(component = fct_inorder(component)) |>
+  ggplot(aes(value, terms, fill = terms)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~component, nrow = 1) +
+  labs(y = NULL)
+
+
+
+tidied_pca |>
+  filter(component %in% paste0("PC", 1:4))|>
+  group_by(component) |>
+  top_n(8, abs(value)) |>
+  ungroup() |>
+  mutate(terms = reorder_within(terms, abs(value), component)) |>
+  ggplot(aes(abs(value), terms, fill = value > 0)) +
+  geom_col() +
+  facet_wrap(~component, scales = "free_y") +
+  scale_y_reordered() +
+  labs(
+    x = "Absolute value of contribution",
+    y = NULL, fill = "Positive?"
+  )
+
+```
+
+
+
+```{r Comparing Demographic access}
+# Assuming PCA scores are in columns PC1, PC2, etc.
+housing_pca <- combined_data_pca %>% 
+  select(PC1, raceeth_p)
+
+# Calculate the mean PC1 score for each racial group
+mean_pc1_by_race <- housing_pca %>%
+  group_by(raceeth_p) %>%
+  summarise(mean_PC1 = mean(PC1, na.rm = TRUE))
+
+# View the results
+print(mean_pc1_by_race)
+
+```
+
+```{r visualize comparison}
+
+# Create a boxplot to visualize the distribution of PC1 scores by racial group
+ggplot(housing_pca, aes(x = raceeth_p, y = PC1, fill = raceeth_p)) +
+  geom_boxplot() +
+  labs(title = "Comparison of Housing Quality (PC1) by Racial Group", x = "Racial Group", y = "Principal Component 1 (PC1)", fill = 'Race') +
+  theme_minimal() +
+  theme(axis.text.x = element_text(vjust = 0.7, angle=70)) +
+  scale_x_discrete(labels = ~ str_wrap(as.character(.x), 20))
+
+```
+
+## Results / Discussion
+
+According to the EDA part, it is clear that there are significant disparities in housing conditions across NYC boroughs. Staten Island and Queens have the largest household sizes, and it may reflect the family oriented housing setups. Manhattan has the smallest household size. Rent burden disparities are significant.Bronx and Brooklyn show higher proportions of "Moderately burdened" and "Severely burdened" households, in the meanwhile, Manhattan has a larger proportion of "Not burdened" households. This comparison highlights the affordability challenges in the Bronx and Brooklyn.
+
+Housing quality is another major problem in the Bronx and Brooklyn. Residents report more issues such as leaks, mold, rodents, and broken elevators in these regions, which reflect aging infrastructure and insufficient maintenance. Overcrowding is also more prevalent in these boroughs, which further intensify challenges of life quality. In contrast, Manhattan and Staten Island report fewer housing issues and overcrowding.
+
+Food insecurity has the same trend. Bronx and Queens shows the highest levels, particularly in the Bronx, where 10.1% of households face food insecurity. Staten Island and Manhattan report the lowest levels, this actually reflects economic disparities play a key role from the side. Moreover, occupancy analysis shows that most units are occupied across boroughs. However, Manhattan has a relatively higher proportion of vacant units, and many of them are classified as "not available for rent or sale." This points out the under utilization of housing, which may related to luxury or investment properties, and this phenomenon contrasts with affordability issues in other boroughs.
+
+To further analyze the topic, we applied PCA for the data since it can provides a more comprehensive understanding of housing quality issues by breaking them into different dimensions. The first plot illustrates how various factors (y-axis) contribute to the first five principal components. PC1 shows general measure of overall housing quality, and we can see issues like toilet problems, rodent infestations, and structural damage contribute a lot. PC2 focuses on structural problems like wall and floor holes and peeling paint, which reflects the physical status of the housing units. PC3 emphasizes on structural deficiencies as well, and peeling paint and floor holes contribute more in this PC. PC4 shows pest-related problems such as roaches and floor holes, which indicates sanitation concerns. PC5 introduces a mixture of all issues, which is meant to show housing conditions that not fully captured in earlier components. These PCs provide a multi-dimensional review of housings in these dataset.
+
+The second visualization refines the first plot by isolating the top contributors to each PC and their relative importance. PC1 is heavily influenced by issues like peeling paint, rodents, and elevator problems; PC2 and PC3 focus on structural integrity and safety related problem. This separation of components provides a clearer picture of the relationships between each housing dimensions, which enables a more specific focus on critical areas we found.
+
+The final visualization highlights disparities in housing quality across different racial groups using PC1's scores. Indigenous or Pacific Islander people have the highest mean PC1 scores, which indicates the most severe housing quality challenges. It is followed by family of "Other or two or more races" and Black family. In contrast, Hispanic and Asian households have lower PC1 scores, which suggest relatively better housing conditions. These disparities underscore systemic inequities with respect of housing quality, particularly affect marginalized groups.
+
+In general, these analysis reveals  significant disparities in housing conditions across NYC boroughs and racial groups. The Bronx and Brooklyn face severe affordability challenges, housing issues, and overcrowding. In contrast, Manhattan shows underutilized housing that may caused by luxury properties. PCA highlights different dimensions of housing quality, such as structural and sanitation problems. What's more, racial disparities further point out systemic inequities. Indigenous, Pacific Islander, and Black households experience poorer conditions. These findings indicate specific and targeted interventions or policies are necessary to address existing housing problems.
+
+## Conclusion
+
+  The analysis shows significant differences in housing conditions across New York City's boroughs and among different racial groups. Staten Island and Queens, with their bigger households, show more family-oriented housing setups, meanwhile Manhattan has smaller household sizes and also a high proportion of vacant units, most of which are luxury or investment properties. This underutilization contrasts starkly with the affordability challenges faced by residents of the Bronx and Brooklyn, where "Moderately burdened" and "Severely burdened" households are more common. The Bronx and Brooklyn also face more pronounced housing quality issues, such as leaks, mold, rodent infestations, and overcrowding, which negatively impact life quality. Conversely, Manhattan and Staten Island experience fewer such issues, highlighting disparities in housing infrastructure and maintenance.
+
+  Food insecurity mirrors these patterns, with the Bronx and Queens exhibiting higher levels, particularly in the Bronx, where over 10% of households are food insecure. The PCA analysis provides a multi-dimensional view of housing quality issues, breaking them into structural, sanitation, and general housing quality components. Notably, Indigenous, Pacific Islander, and Black households face the most severe housing challenges, as revealed by higher PC1 scores, while Hispanic and Asian households report relatively better conditions. These findings point to systemic inequities in housing quality and emphasize the need for targeted interventions and policies to address affordability, maintenance, and racial disparities in NYC's housing landscape.
+
+
+
+## References
+
+  Chambon, D., & Gerszten, J. (2023). A statistical framework for analyzing housing quality: A  case study of new york city. Computational Statistics, 38(4), 1669–1685.     https://doi.org/10.1007/s00180-023-01394-w 
+
+  CHCP New York City. Housing Conditions & Instability: A health crisis for NYC ... CHCPNY New Lens. https://chpcny.org/wp-content/uploads/2016/09/General-Rx-for-Housing-Brief.pdf 
+
+  EJNYC. (2024). Access to safe and healthy housing. NYC Mayor’s Office of Climate and Environmental Justice. https://climate.cityofnewyork.us/ejnyc-report/the-state-of-environmental-justice-in-nyc/access-to-safe-and-healthy-housing/#:~:text=According%20to%20Where%20We%20Live%20NYC%2C%20public%20housing%20residents%20reported,maintenance%20problems%20in%20their%20homes 
+
+  Office of Budget Policy and Analysis. (2024, February). New Yorkers in need: The housing insecurity crisis. Office of the New York State Comptroller. https://www.osc.ny.gov/reports/new-yorkers-need-housing-insecurity-crisis 
+
+  Raudales, A. A. (2024, July 26). Report: Living conditions in private, low-income housing are “horrendous.” City & State NY. https://www.cityandstateny.com/policy/2024/07/report-living-conditions-private-low-income-housing-are-horrendous/398348/ 
+  
+  Silge, J. (2020, May 27). PCA and UMAP with tidymodels and #TidyTuesday cocktail recipes. Julia Silge. https://juliasilge.com/blog/cocktail-recipes-umap/
+
+  Zaveri, M. (2024, February 8). New York City’s housing crunch is the worst it has been in over 50 years. The New York Times. https://www.nytimes.com/2024/02/08/nyregion/apartment-vacancy-rate-housing-crisis.html 
+
